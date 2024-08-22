@@ -1,107 +1,79 @@
 import streamlit as st
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
-import datetime
 
-class PredictionMarket:
-    def __init__(self):
-        self.total_invested = 0
-        self.investments = {"A": 0, "B": 0}
-        self.shares = {"A": 0.5, "B": 0.5}
-        self.history = []
-        self.buy_pressure = {"A": 0, "B": 0}
-        self.sell_pressure = {"A": 0, "B": 0}
+def calculate_token_prices(a_amount, b_amount, usdc_amount):
+    total_tokens = a_amount + b_amount
+    a_price = usdc_amount / total_tokens
+    b_price = 1 - a_price
+    return a_price, b_price
 
-    def invest(self, option, amount):
-        self.investments[option] += amount
-        self.total_invested += amount
-        self.update_prices()
-        self.history.append({
-            'timestamp': datetime.datetime.now(),
-            'A': self.shares['A'],
-            'B': self.shares['B']
-        })
-        self.buy_pressure[option] += amount
-        self.sell_pressure[option] = max(0, self.sell_pressure[option] - amount)
-
-    def update_prices(self):
-        for option in self.investments:
-            if self.total_invested > 0:
-                self.shares[option] = self.investments[option] / self.total_invested
-            else:
-                self.shares[option] = 0.5
-
-    def get_price(self, option):
-        return self.shares[option]
-
-def create_price_chart(market):
-    df = pd.DataFrame(market.history)
-    if df.empty:
-        fig = go.Figure()
-        fig.update_layout(title='Price History (No Data)', xaxis_title='Time', yaxis_title='Price')
-        return fig
-    df.set_index('timestamp', inplace=True)
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df['A'], mode='lines', name='Option A'))
-    fig.add_trace(go.Scatter(x=df.index, y=df['B'], mode='lines', name='Option B'))
-    fig.update_layout(title='Price History', xaxis_title='Time', yaxis_title='Price')
-    return fig
-
-def create_pressure_chart(market):
-    data = {
-        'Option': ['A', 'B'],
-        'Buy Pressure': [market.buy_pressure['A'], market.buy_pressure['B']],
-        'Sell Pressure': [market.sell_pressure['A'], market.sell_pressure['B']]
-    }
-    df = pd.DataFrame(data)
-    fig = px.bar(df, x='Option', y=['Buy Pressure', 'Sell Pressure'], title='Buy and Sell Pressure')
-    return fig
-
-def create_liquidity_chart(market):
-    liquidity = market.total_invested
-    fig = go.Figure(go.Indicator(
-        mode = "gauge+number",
-        value = liquidity,
-        title = {'text': "Market Liquidity"},
-        gauge = {'axis': {'range': [None, max(1000, liquidity)]}}
-    ))
-    return fig
+def buy_token(token_amount, current_a, current_b, current_usdc, is_a_token):
+    if is_a_token:
+        new_a = current_a + token_amount
+        new_b = current_b
+    else:
+        new_a = current_a
+        new_b = current_b + token_amount
+    
+    k = current_a * current_b
+    new_usdc = k / (new_a * new_b) * current_usdc
+    
+    return new_a, new_b, new_usdc
 
 def main():
-    st.title('Polymarket Simulation')
+    st.title("Polymarket AMM Simulator")
 
-    if 'market' not in st.session_state:
-        st.session_state.market = PredictionMarket()
+    # Initial state
+    initial_a = st.sidebar.number_input("Initial A Tokens", min_value=1, value=1000)
+    initial_b = st.sidebar.number_input("Initial B Tokens", min_value=1, value=1000)
+    initial_usdc = st.sidebar.number_input("Initial USDC", min_value=1, value=1000)
 
-    market = st.session_state.market
+    # Buy tokens
+    token_to_buy = st.sidebar.selectbox("Token to Buy", ["A", "B"])
+    amount_to_buy = st.sidebar.number_input("Amount to Buy", min_value=0.0, value=0.0, step=0.1)
 
-    st.sidebar.header('Invest')
-    option = st.sidebar.selectbox('Choose option', ['A', 'B'])
-    amount = st.sidebar.number_input('Amount to invest', min_value=0.0, value=10.0, step=1.0)
-    if st.sidebar.button('Invest'):
-        market.invest(option, amount)
-        st.sidebar.success(f'Invested {amount} in Option {option}')
+    # Calculate initial prices
+    initial_a_price, initial_b_price = calculate_token_prices(initial_a, initial_b, initial_usdc)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric('Option A Price', f"{market.get_price('A'):.2f}")
-    with col2:
-        st.metric('Option B Price', f"{market.get_price('B'):.2f}")
+    # Simulate purchase
+    if amount_to_buy > 0:
+        new_a, new_b, new_usdc = buy_token(amount_to_buy, initial_a, initial_b, initial_usdc, token_to_buy == "A")
+        new_a_price, new_b_price = calculate_token_prices(new_a, new_b, new_usdc)
+    else:
+        new_a, new_b, new_usdc = initial_a, initial_b, initial_usdc
+        new_a_price, new_b_price = initial_a_price, initial_b_price
 
-    st.header('Price History')
-    st.plotly_chart(create_price_chart(market))
+    # Display results
+    col1, col2, col3 = st.columns(3)
+    col1.metric("A Tokens", f"{new_a:.2f}", f"{new_a - initial_a:.2f}")
+    col2.metric("B Tokens", f"{new_b:.2f}", f"{new_b - initial_b:.2f}")
+    col3.metric("USDC in LP", f"{new_usdc:.2f}", f"{new_usdc - initial_usdc:.2f}")
 
-    st.header('Buy and Sell Pressure')
-    st.plotly_chart(create_pressure_chart(market))
+    st.subheader("Token Prices")
+    price_df = pd.DataFrame({
+        "Token": ["A", "B"],
+        "Initial Price": [initial_a_price, initial_b_price],
+        "New Price": [new_a_price, new_b_price]
+    })
+    st.table(price_df)
 
-    st.header('Market Liquidity')
-    st.plotly_chart(create_liquidity_chart(market))
+    # Visualize token distribution
+    fig = go.Figure(data=[
+        go.Bar(name='A Tokens', x=['Initial', 'After Purchase'], y=[initial_a, new_a]),
+        go.Bar(name='B Tokens', x=['Initial', 'After Purchase'], y=[initial_b, new_b])
+    ])
+    fig.update_layout(barmode='group', title='Token Distribution')
+    st.plotly_chart(fig)
 
-    st.header('Market Statistics')
-    st.write(f"Total Invested: {market.total_invested:.2f}")
-    st.write(f"Investments in A: {market.investments['A']:.2f}")
-    st.write(f"Investments in B: {market.investments['B']:.2f}")
+    # Visualize price changes
+    price_fig = go.Figure(data=[
+        go.Bar(name='A Token Price', x=['Initial', 'After Purchase'], y=[initial_a_price, new_a_price]),
+        go.Bar(name='B Token Price', x=['Initial', 'After Purchase'], y=[initial_b_price, new_b_price])
+    ])
+    price_fig.update_layout(barmode='group', title='Token Prices')
+    st.plotly_chart(price_fig)
 
 if __name__ == "__main__":
     main()
