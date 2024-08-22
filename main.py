@@ -9,20 +9,19 @@ def calculate_token_prices(a_amount, b_amount, usdc_amount):
     b_price = 1 - a_price
     return a_price, b_price
 
-def buy_token(token_amount, current_a, current_b, current_usdc, is_a_token):
+def buy_token_with_usdc(usdc_amount, current_a, current_b, current_usdc, is_a_token):
     k = current_a * current_b
     if is_a_token:
-        new_b = k / (current_a + token_amount)
-        usdc_spent = current_usdc * (1 - new_b / current_b)
-        new_a = current_a + token_amount
-        new_usdc = current_usdc + usdc_spent
+        new_b = current_b * current_usdc / (current_usdc + usdc_amount)
+        tokens_bought = current_a - k / new_b
+        new_a = current_a + tokens_bought
     else:
-        new_a = k / (current_b + token_amount)
-        usdc_spent = current_usdc * (1 - new_a / current_a)
-        new_b = current_b + token_amount
-        new_usdc = current_usdc + usdc_spent
+        new_a = current_a * current_usdc / (current_usdc + usdc_amount)
+        tokens_bought = current_b - k / new_a
+        new_b = current_b + tokens_bought
     
-    return new_a, new_b, new_usdc, usdc_spent
+    new_usdc = current_usdc + usdc_amount
+    return new_a, new_b, new_usdc, tokens_bought
 
 def main():
     st.title("Polymarket AMM Simulator")
@@ -32,21 +31,21 @@ def main():
     initial_b = st.sidebar.number_input("Initial B Tokens", min_value=1, value=1000)
     initial_usdc = st.sidebar.number_input("Initial USDC", min_value=1, value=1000)
 
-    # Buy tokens
+    # Buy tokens with USDC
     token_to_buy = st.sidebar.selectbox("Token to Buy", ["A", "B"])
-    amount_to_buy = st.sidebar.number_input("Amount to Buy", min_value=0.0, value=0.0, step=0.1)
+    usdc_to_spend = st.sidebar.number_input("USDC to Spend", min_value=0.0, value=0.0, step=0.1)
 
     # Calculate initial prices
     initial_a_price, initial_b_price = calculate_token_prices(initial_a, initial_b, initial_usdc)
 
     # Simulate purchase
-    if amount_to_buy > 0:
-        new_a, new_b, new_usdc, usdc_spent = buy_token(amount_to_buy, initial_a, initial_b, initial_usdc, token_to_buy == "A")
+    if usdc_to_spend > 0:
+        new_a, new_b, new_usdc, tokens_bought = buy_token_with_usdc(usdc_to_spend, initial_a, initial_b, initial_usdc, token_to_buy == "A")
         new_a_price, new_b_price = calculate_token_prices(new_a, new_b, new_usdc)
     else:
         new_a, new_b, new_usdc = initial_a, initial_b, initial_usdc
         new_a_price, new_b_price = initial_a_price, initial_b_price
-        usdc_spent = 0
+        tokens_bought = 0
 
     # Display results
     col1, col2, col3 = st.columns(3)
@@ -65,12 +64,19 @@ def main():
     # Display intermediate calculations
     st.subheader("Intermediate Calculations")
     st.write(f"Constant product k: {initial_a * initial_b:.2f}")
-    if amount_to_buy > 0:
+    if usdc_to_spend > 0:
         if token_to_buy == "A":
-            st.write(f"New B tokens: k / (A + bought A) = {initial_a * initial_b:.2f} / ({initial_a} + {amount_to_buy}) = {new_b:.2f}")
+            st.write(f"New B tokens: current_b * current_usdc / (current_usdc + usdc_spent) = "
+                     f"{initial_b} * {initial_usdc} / ({initial_usdc} + {usdc_to_spend}) = {new_b:.2f}")
+            st.write(f"A tokens bought: current_a - k / new_b = "
+                     f"{initial_a} - {initial_a * initial_b:.2f} / {new_b:.2f} = {tokens_bought:.2f}")
         else:
-            st.write(f"New A tokens: k / (B + bought B) = {initial_a * initial_b:.2f} / ({initial_b} + {amount_to_buy}) = {new_a:.2f}")
-        st.write(f"USDC spent: {usdc_spent:.2f}")
+            st.write(f"New A tokens: current_a * current_usdc / (current_usdc + usdc_spent) = "
+                     f"{initial_a} * {initial_usdc} / ({initial_usdc} + {usdc_to_spend}) = {new_a:.2f}")
+            st.write(f"B tokens bought: current_b - k / new_a = "
+                     f"{initial_b} - {initial_a * initial_b:.2f} / {new_a:.2f} = {tokens_bought:.2f}")
+        st.write(f"USDC spent: {usdc_to_spend:.2f}")
+        st.write(f"{token_to_buy} tokens bought: {tokens_bought:.2f}")
 
     # Visualize token distribution
     fig = go.Figure(data=[
